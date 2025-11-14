@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,14 +20,17 @@ type config struct {
 type cliCommand struct {
 	name        string
 	description string
-	callback    func(*config, ...string) error
+	callback    func(*config, map[string]pokeapi.Pokemon, ...string) error
 }
-
-var Pokedex = make(map[string]pokeapi.Pokemon)
 
 func startRepl(cfg *config) {
 
 	reader := bufio.NewScanner(os.Stdin)
+	Pokedex, err := openPokedex()
+	if err != nil {
+		fmt.Println(err)
+	}
+
 	for {
 		fmt.Print("Pokedex > ")
 		reader.Scan()
@@ -44,7 +48,7 @@ func startRepl(cfg *config) {
 
 		command, exists := getCommands()[commandName]
 		if exists {
-			err := command.callback(cfg, args...)
+			err := command.callback(cfg, Pokedex, args...)
 			if err != nil {
 				fmt.Println(err)
 			}
@@ -56,13 +60,51 @@ func startRepl(cfg *config) {
 	}
 }
 
-func commandExit(cfg *config, args ...string) error {
+func openPokedex() (map[string]pokeapi.Pokemon, error) {
+
+	savedPokedex, err := os.Open(FilePath)
+	if err != nil {
+		return nil, fmt.Errorf("Error opening file: %v\n", err)
+	}
+
+	defer savedPokedex.Close()
+
+	var Pokedex map[string]pokeapi.Pokemon
+
+	decoder := json.NewDecoder(savedPokedex)
+	err = decoder.Decode(&Pokedex)
+	if err != nil {
+		return nil, fmt.Errorf("Error decoding JSON: %v", err)
+	}
+
+	return Pokedex, nil
+
+}
+
+func commandExit(cfg *config, Pokedex map[string]pokeapi.Pokemon, args ...string) error {
 	fmt.Println("Closing the Pokedex... Goodbye!")
 	os.Exit(0)
 	return nil
 }
 
-func commandHelp(cfg *config, args ...string) error {
+func commandSave(cfg *config, Pokedex map[string]pokeapi.Pokemon, args ...string) error {
+	fmt.Println("Saving...")
+
+	jsonData, err := json.MarshalIndent(Pokedex, "", "  ")
+	if err != nil {
+		return fmt.Errorf("Error marshaling JSON: %v", err)
+	}
+
+	err = os.WriteFile(FilePath, jsonData, 0644)
+	if err != nil {
+		return fmt.Errorf("Error writing JSON to file: %v", err)
+	}
+
+	fmt.Println("Pokedex Successfully Saved")
+	return nil
+}
+
+func commandHelp(cfg *config, Pokedex map[string]pokeapi.Pokemon, args ...string) error {
 	fmt.Println()
 	fmt.Println("Welcome to the Pokedex!")
 	fmt.Println("Usage:")
@@ -75,7 +117,7 @@ func commandHelp(cfg *config, args ...string) error {
 	return nil
 }
 
-func commandPokedex(cfg *config, args ...string) error {
+func commandPokedex(cfg *config, Pokedex map[string]pokeapi.Pokemon, args ...string) error {
 	fmt.Println()
 	fmt.Println("Your Pokedex:")
 	for _, pokemon := range Pokedex {
@@ -85,7 +127,7 @@ func commandPokedex(cfg *config, args ...string) error {
 	return nil
 }
 
-func commandMapf(cfg *config, args ...string) error {
+func commandMapf(cfg *config, Pokedex map[string]pokeapi.Pokemon, args ...string) error {
 	fmt.Println()
 	locationsResp, err := cfg.pokeapiClient.ListLocations(cfg.nextLocationsURL)
 	if err != nil {
@@ -102,10 +144,10 @@ func commandMapf(cfg *config, args ...string) error {
 	return nil
 }
 
-func commandMapb(cfg *config, args ...string) error {
+func commandMapb(cfg *config, Pokedex map[string]pokeapi.Pokemon, args ...string) error {
 	fmt.Println()
 	if cfg.prevLocationsURL == nil {
-		return errors.New("You're on the first page\n")
+		return errors.New("you're on the first page\n")
 	}
 
 	locationResp, err := cfg.pokeapiClient.ListLocations(cfg.prevLocationsURL)
@@ -123,7 +165,7 @@ func commandMapb(cfg *config, args ...string) error {
 	return nil
 }
 
-func commandExplore(cfg *config, args ...string) error {
+func commandExplore(cfg *config, Pokedex map[string]pokeapi.Pokemon, args ...string) error {
 	if len(args) != 1 {
 		return errors.New("you must provide a location name")
 	}
@@ -142,7 +184,7 @@ func commandExplore(cfg *config, args ...string) error {
 	return nil
 }
 
-func commandCatch(cfg *config, args ...string) error {
+func commandCatch(cfg *config, Pokedex map[string]pokeapi.Pokemon, args ...string) error {
 	if len(args) != 1 {
 		return errors.New("you must provide a pokemon name")
 	}
@@ -161,7 +203,7 @@ func commandCatch(cfg *config, args ...string) error {
 
 }
 
-func commandInspect(cfg *config, args ...string) error {
+func commandInspect(cfg *config, Pokedex map[string]pokeapi.Pokemon, args ...string) error {
 	if len(args) != 1 {
 		return errors.New("you must provide a pokemon name")
 	}
@@ -233,6 +275,11 @@ func getCommands() map[string]cliCommand {
 			name:        "pokedex",
 			description: "Lists all caught Pokemon",
 			callback:    commandPokedex,
+		},
+		"save": {
+			name:        "save",
+			description: "Saves your Pokedex",
+			callback:    commandSave,
 		},
 	}
 }
